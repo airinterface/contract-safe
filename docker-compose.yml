@@ -1,0 +1,104 @@
+version: "3.8"
+
+services:
+  # PostgreSQL for Orchestrator
+  postgres:
+    image: postgres:15-alpine
+    container_name: contractsafe-postgres
+    environment:
+      POSTGRES_USER: contractsafe
+      POSTGRES_PASSWORD: contractsafe
+      POSTGRES_DB: contractsafe
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U contractsafe"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for BullMQ
+  redis:
+    image: redis:7-alpine
+    container_name: contractsafe-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Hardhat Node (Local Blockchain)
+  hardhat:
+    build:
+      context: ./contract
+      dockerfile: Dockerfile
+    container_name: contractsafe-hardhat
+    ports:
+      - "8545:8545"
+    command: npx hardhat node
+    volumes:
+      - ./contract:/app
+      - /app/node_modules
+
+  # Orchestrator API (Go)
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: contractsafe-api
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql://contractsafe:contractsafe@postgres:5432/contractsafe
+      REDIS_URL: redis://redis:6379
+      PORT: 8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./api:/app
+      - /app/bin
+
+  # Frontend (React + Vite)
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: contractsafe-web
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://localhost:8080
+      VITE_DYNAMIC_ENV_ID: ${REACT_APP_DYNAMIC_ENV_ID}
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+    command: npm run dev -- --host
+
+  # Example MCP Agent
+  mcp-agent:
+    build:
+      context: ./example_agent
+      dockerfile: Dockerfile
+    container_name: contractsafe-mcp-agent
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    volumes:
+      - ./example_agent:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
+  redis_data:
