@@ -78,6 +78,68 @@ Treasury --> Uniswap
 
 ---
 
+## Development Scripts
+
+### 1. Compiling for Environment
+
+#### Compile Protobuf
+
+```bash
+# Generate protobuf files for Go API
+./script/generate_protobuf
+```
+
+#### Compile Smart Contracts
+
+```bash
+# Navigate to contract directory
+cd contract
+
+# Install dependencies
+npm install
+
+# Compile contracts
+npx hardhat compile
+```
+
+### 2. Deploying Contracts
+
+```bash
+# Deploy to local network
+cd contract
+npx hardhat run scripts/deploy.js --network localhost
+
+# Deploy to testnet (e.g., Sepolia)
+npx hardhat run scripts/deploy.js --network sepolia
+
+# Deploy to mainnet
+npx hardhat run scripts/deploy.js --network mainnet
+```
+
+### 3. Startup Dev Environment
+
+```bash
+# Start all services using Docker Compose
+docker-compose up
+
+# Or start individual services:
+
+# Start local blockchain node
+cd contract
+npx hardhat node
+
+# Start API service
+cd api
+go run main.go
+
+# Start frontend
+cd web
+npm install
+npm run dev
+```
+
+---
+
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
