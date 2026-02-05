@@ -4,7 +4,51 @@
 
 ContractSafe is an event-driven escrow system that combines on-chain deterministic state management with off-chain asynchronous workflows. The architecture follows an event-sourcing pattern where smart contracts emit events for every state transition, which are indexed by Goldsky and streamed to off-chain services via webhooks. This design enables human validators, AI agents, and oracle-based verification to operate asynchronously while maintaining transparency and auditability.
 
-The system is built on Ethereum using Hardhat v3 for smart contract development and testing, with Uniswap v4 integration for flexible token distribution. All user interactions are gasless via ERC-4337 account abstraction with Paymaster sponsorship.
+The system is built on **Polygon** for escrow management and payment splitting (leveraging lower gas costs), with **Uniswap v4** integration for cross-chain token conversion and distribution. Contributors and validators can specify their preferred chain and token, and the system automatically converts and bridges funds to their chosen destination. All user interactions are gasless via ERC-4337 account abstraction with Paymaster sponsorship.
+
+### Multi-Chain Payment Architecture
+
+**Escrow Layer (Polygon):**
+
+- All tasks are created and managed on Polygon
+- Escrow funds are locked on Polygon
+- Payment splitting calculations occur on Polygon
+- Lower gas costs for task management operations
+
+**Funding Flow (Any Chain → Polygon):**
+
+- Task creators can fund escrow from any supported chain (Ethereum, Arbitrum, Optimism, Base, etc.)
+- **Uniswap v4 on source chain automatically converts creator's tokens to bridgeable assets (USDC)**
+- LayerZero bridges funds from source chain to Polygon
+- Escrow contract on Polygon receives and locks funds
+- Creator never needs to manually bridge or hold MATIC
+
+**Example:** Creator on Ethereum with ETH → Uniswap v4 swaps ETH to USDC → LayerZero bridges USDC to Polygon
+
+**Distribution Layer (Polygon → Any Chain):**
+
+- Uniswap v4 on Polygon converts funds to desired tokens
+- LayerZero bridges tokens to recipient's preferred chain
+- Recipients specify: target chain (Ethereum, Arbitrum, Optimism, Base, etc.) and token (ETH, USDC, DAI, etc.)
+- Automatic routing through optimal bridge providers
+
+**Complete Flow Example:**
+
+1. Creator on Ethereum wants to create task with 1 ETH escrow
+2. **Uniswap v4 on Ethereum swaps ETH → USDC** (automatic token conversion)
+3. LayerZero bridges USDC from Ethereum to Polygon
+4. **Uniswap v4 on Polygon swaps USDC → MATIC** (for escrow locking)
+5. Task created on Polygon with escrowed MATIC
+6. Work completed and approved
+7. **Uniswap v4 on Polygon swaps MATIC → recipient's desired tokens** (USDC, DAI, etc.)
+8. LayerZero bridges tokens to recipient's chosen chains
+9. Recipients receive funds on their preferred chains in their preferred tokens
+
+**Key Point:** Uniswap v4 is used at THREE stages:
+
+- **Stage 1 (Source Chain)**: Convert creator's token → bridgeable asset (USDC)
+- **Stage 2 (Polygon)**: Convert bridged asset → MATIC for escrow
+- **Stage 3 (Polygon)**: Convert MATIC → recipient's desired tokens for payout
 
 ## Architecture
 
@@ -246,6 +290,12 @@ graph TB
 
 ### Technology Stack
 
+**Blockchain:**
+
+- Primary Chain: Polygon (escrow, state management, payment splitting)
+- Supported Destination Chains: Ethereum, Arbitrum, Optimism, Base, Polygon zkEVM
+- Cross-Chain Bridges: LayerZero, Axelar, or Connext for multi-chain delivery
+
 **Smart Contracts:**
 
 - Development Framework: Hardhat v3
@@ -253,6 +303,7 @@ graph TB
 - Testing: Hardhat v3 native Solidity tests + TypeScript integration tests
 - Account Abstraction: ERC-4337 (EntryPoint, Smart Accounts, Paymaster)
 - Token Distribution: Uniswap v4 with custom hooks
+- Cross-Chain: LayerZero OFT or equivalent for bridging
 
 **Indexing & Events:**
 
@@ -382,6 +433,116 @@ contract ContractFactory {
 }
 ```
 
+#### CrossChainFunding Contract (Multi-Chain Deployment)
+
+Deployed on all supported chains (Ethereum, Arbitrum, Optimism, Base) to handle escrow funding from any chain to Polygon.
+
+**Key Functions:**
+
+```solidity
+contract CrossChainFunding {
+    IPoolManager public uniswapPoolManager;
+    ILayerZeroEndpoint public layerZeroEndpoint;
+    uint16 public constant POLYGON_CHAIN_ID = 109; // LayerZero Polygon chain ID
+    address public polygonEscrowAddress;
+
+    event FundingInitiated(
+        address indexed creator,
+        uint256 amount,
+        address sourceToken,
+        uint256 destinationChainId,
+        bytes32 taskIdentifier
+    );
+
+    function fundTaskCrossChain(
+        address sourceToken,
+        uint256 amount,
+        address contributor,
+        address validator,
+        uint8 contributorPercentage,
+        uint8 validatorPercentage,
+        string calldata descriptionHash,
+        PaymentPreference calldata contributorPref,
+        PaymentPreference calldata validatorPref
+    ) external payable {
+        // Step 1: Swap source token to bridgeable asset (USDC) on source chain
+        uint256 bridgeableAmount = _swapToBridgeable(sourceToken, amount);
+
+        // Step 2: Encode task creation parameters
+        bytes memory payload = abi.encode(
+            msg.sender, // creator
+            contributor,
+            validator,
+            contributorPercentage,
+            validatorPercentage,
+            descriptionHash,
+            contributorPref,
+            validatorPref,
+            bridgeableAmount
+        );
+
+        // Step 3: Bridge to Polygon via LayerZero
+        layerZeroEndpoint.send{value: msg.value}(
+            POLYGON_CHAIN_ID,
+            abi.encodePacked(polygonEscrowAddress),
+            payload,
+            payable(msg.sender),
+            address(0),
+            ""
+        );
+
+        emit FundingInitiated(
+            msg.sender,
+            amount,
+            sourceToken,
+            POLYGON_CHAIN_ID,
+            keccak256(payload)
+        );
+    }
+
+    function _swapToBridgeable(
+        address sourceToken,
+        uint256 amount
+    ) internal returns (uint256 bridgeableAmount) {
+        // CRITICAL: Use Uniswap v4 to convert ANY token to USDC for bridging
+        // This enables creators to pay in ETH, DAI, WBTC, or any other token
+        // Uniswap v4 provides optimal routing and pricing
+        address USDC = getUSDCAddress();
+
+        if (sourceToken == USDC) {
+            return amount; // Already in bridgeable asset, no swap needed
+        }
+
+        // Swap via Uniswap v4
+        PoolKey memory key = PoolKey({
+            currency0: Currency.wrap(sourceToken),
+            currency1: Currency.wrap(USDC),
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: IHooks(address(0))
+        });
+
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: true,
+            amountSpecified: int256(amount),
+            sqrtPriceLimitX96: 0
+        });
+
+        BalanceDelta delta = uniswapPoolManager.swap(key, params, "");
+        bridgeableAmount = uint256(int256(-delta.amount1()));
+    }
+
+    function getUSDCAddress() internal view returns (address) {
+        // Return USDC address for current chain
+        if (block.chainid == 1) return 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48; // Ethereum
+        if (block.chainid == 42161) return 0xaf88d065e77c8cC2239327C5EDb3A432268e5831; // Arbitrum
+        if (block.chainid == 10) return 0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85; // Optimism
+        if (block.chainid == 8453) return 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913; // Base
+        revert("Unsupported chain");
+    }
+}
+```
+
 #### Escrow Contract
 
 The core contract managing task lifecycle and fund custody.
@@ -389,6 +550,12 @@ The core contract managing task lifecycle and fund custody.
 **State Variables:**
 
 ```solidity
+struct PaymentPreference {
+    uint256 destinationChainId; // LayerZero chain ID
+    address tokenAddress;        // Desired token on destination chain
+    address recipientAddress;    // Recipient address on destination chain
+}
+
 struct Task {
     uint256 taskId;
     address creator;
@@ -415,6 +582,8 @@ enum TaskState {
 }
 
 mapping(uint256 => Task) public tasks;
+mapping(uint256 => PaymentPreference) public contributorPaymentPrefs;
+mapping(uint256 => PaymentPreference) public validatorPaymentPrefs;
 uint256 public nextTaskId;
 ```
 
@@ -425,6 +594,11 @@ function createTask(
     address contributor,
     address validator,
     uint8 contributorPercentage,
+    uint8 validatorPercentage,
+    string calldata descriptionHash,
+    PaymentPreference calldata contributorPref,
+    PaymentPreference calldata validatorPref
+) external payable returns (uint256 taskId);
     uint8 validatorPercentage,
     string calldata descriptionHash
 ) external payable returns (uint256 taskId);
@@ -440,6 +614,81 @@ function rejectWork(uint256 taskId) external;
 function processPayment(uint256 taskId) internal;
 
 function refund(uint256 taskId) internal;
+
+// LayerZero receive function for cross-chain task creation
+function lzReceive(
+    uint16 _srcChainId,
+    bytes memory _srcAddress,
+    uint64 _nonce,
+    bytes memory _payload
+) external;
+```
+
+**Cross-Chain Task Creation:**
+
+```solidity
+// Called by LayerZero when funds arrive from another chain
+function lzReceive(
+    uint16 _srcChainId,
+    bytes memory _srcAddress,
+    uint64 _nonce,
+    bytes memory _payload
+) external override {
+    require(msg.sender == address(layerZeroEndpoint), "Only LayerZero");
+
+    // Decode task creation parameters
+    (
+        address creator,
+        address contributor,
+        address validator,
+        uint8 contributorPercentage,
+        uint8 validatorPercentage,
+        string memory descriptionHash,
+        PaymentPreference memory contributorPref,
+        PaymentPreference memory validatorPref,
+        uint256 bridgedAmount
+    ) = abi.decode(_payload, (address, address, address, uint8, uint8, string, PaymentPreference, PaymentPreference, uint256));
+
+    // Convert bridged USDC to MATIC on Polygon
+    uint256 maticAmount = _swapToMatic(bridgedAmount);
+
+    // Create task with bridged funds
+    uint256 taskId = _createTaskInternal(
+        creator,
+        contributor,
+        validator,
+        contributorPercentage,
+        validatorPercentage,
+        descriptionHash,
+        contributorPref,
+        validatorPref,
+        maticAmount
+    );
+
+    emit CrossChainTaskCreated(taskId, _srcChainId, creator, maticAmount);
+}
+
+function _swapToMatic(uint256 usdcAmount) internal returns (uint256 maticAmount) {
+    address USDC = 0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174; // Polygon USDC
+
+    // Swap USDC to MATIC via Uniswap v4
+    PoolKey memory key = PoolKey({
+        currency0: Currency.wrap(USDC),
+        currency1: Currency.wrap(address(0)), // MATIC
+        fee: 3000,
+        tickSpacing: 60,
+        hooks: IHooks(address(0))
+    });
+
+    IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+        zeroForOne: true,
+        amountSpecified: int256(usdcAmount),
+        sqrtPriceLimitX96: 0
+    });
+
+    BalanceDelta delta = uniswapPoolManager.swap(key, params, "");
+    maticAmount = uint256(int256(-delta.amount1()));
+}
 ```
 
 **Events:**
@@ -457,7 +706,7 @@ event TaskRefunded(uint256 indexed taskId, address creator, uint256 amount);
 
 #### Treasury Contract
 
-Manages fund custody and distribution, with optional Uniswap v4 integration for token swaps.
+Manages fund custody and distribution on Polygon, with Uniswap v4 integration for token swaps and cross-chain bridging for multi-chain delivery.
 
 **Key Functions:**
 
@@ -474,27 +723,149 @@ function releasePayment(
 
 function refundCreator(uint256 taskId, address creator, uint256 amount) external onlyEscrow;
 
-function swapAndDistribute(
+function swapAndBridge(
     uint256 taskId,
-    address tokenOut,
-    address contributor,
+    PaymentPreference calldata contributorPref,
     uint256 contributorAmount,
-    address validator,
+    PaymentPreference calldata validatorPref,
     uint256 validatorAmount
 ) external onlyEscrow;
 ```
 
-**Uniswap V4 Integration:**
+**Cross-Chain Payment Flow:**
 
-The Treasury can optionally route payments through Uniswap v4 to enable flexible payout tokens. This uses the Uniswap v4 PoolManager and custom hooks for escrow-specific logic.
+The Treasury orchestrates a multi-step process for cross-chain payments:
+
+1. **Swap on Polygon**: Use Uniswap v4 to convert MATIC to desired tokens
+2. **Bridge to Destination**: Use LayerZero to bridge tokens to recipient's chain
+3. **Deliver to Recipient**: Tokens arrive at recipient's address on their chosen chain
 
 ```solidity
-interface IPoolManager {
-    function swap(PoolKey memory key, IPoolManager.SwapParams memory params, bytes calldata hookData)
-        external
-        returns (BalanceDelta);
+interface ILayerZeroEndpoint {
+    function send(
+        uint16 _dstChainId,
+        bytes calldata _destination,
+        bytes calldata _payload,
+        address payable _refundAddress,
+        address _zroPaymentAddress,
+        bytes calldata _adapterParams
+    ) external payable;
 }
 
+contract Treasury {
+    IPoolManager public uniswapPoolManager;
+    ILayerZeroEndpoint public layerZeroEndpoint;
+
+    function swapAndBridge(
+        uint256 taskId,
+        PaymentPreference calldata contributorPref,
+        uint256 contributorAmount,
+        PaymentPreference calldata validatorPref,
+        uint256 validatorAmount
+    ) external onlyEscrow {
+        // Step 1: Swap MATIC to desired tokens on Polygon
+        uint256 contributorTokenAmount = _swapOnUniswap(
+            contributorAmount,
+            contributorPref.tokenAddress
+        );
+
+        uint256 validatorTokenAmount = _swapOnUniswap(
+            validatorAmount,
+            validatorPref.tokenAddress
+        );
+
+        // Step 2: Bridge to destination chains
+        if (contributorPref.destinationChainId != block.chainid) {
+            _bridgeToChain(
+                taskId,
+                contributorPref.destinationChainId,
+                contributorPref.tokenAddress,
+                contributorPref.recipientAddress,
+                contributorTokenAmount
+            );
+        } else {
+            // Same chain, direct transfer
+            IERC20(contributorPref.tokenAddress).transfer(
+                contributorPref.recipientAddress,
+                contributorTokenAmount
+            );
+        }
+
+        if (validatorPref.destinationChainId != block.chainid) {
+            _bridgeToChain(
+                taskId,
+                validatorPref.destinationChainId,
+                validatorPref.tokenAddress,
+                validatorPref.recipientAddress,
+                validatorTokenAmount
+            );
+        } else {
+            // Same chain, direct transfer
+            IERC20(validatorPref.tokenAddress).transfer(
+                validatorPref.recipientAddress,
+                validatorTokenAmount
+            );
+        }
+
+        emit CrossChainPaymentInitiated(taskId, contributorPref.destinationChainId, validatorPref.destinationChainId);
+    }
+
+    function _swapOnUniswap(
+        uint256 amountIn,
+        address tokenOut
+    ) internal returns (uint256 amountOut) {
+        // Use Uniswap v4 PoolManager to swap MATIC to desired token
+        PoolKey memory key = PoolKey({
+            currency0: Currency.wrap(address(0)), // MATIC
+            currency1: Currency.wrap(tokenOut),
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: IHooks(address(escrowPaymentHook))
+        });
+
+        IPoolManager.SwapParams memory params = IPoolManager.SwapParams({
+            zeroForOne: true,
+            amountSpecified: int256(amountIn),
+            sqrtPriceLimitX96: 0
+        });
+
+        BalanceDelta delta = uniswapPoolManager.swap(key, params, "");
+        amountOut = uint256(int256(-delta.amount1()));
+    }
+
+    function _bridgeToChain(
+        uint256 taskId,
+        uint256 destinationChainId,
+        address token,
+        address recipient,
+        uint256 amount
+    ) internal {
+        // Approve LayerZero endpoint
+        IERC20(token).approve(address(layerZeroEndpoint), amount);
+
+        // Encode payload with recipient and amount
+        bytes memory payload = abi.encode(recipient, amount);
+
+        // Send via LayerZero
+        layerZeroEndpoint.send{value: msg.value}(
+            uint16(destinationChainId),
+            abi.encodePacked(recipient),
+            payload,
+            payable(address(this)),
+            address(0),
+            ""
+        );
+
+        emit TokensBridged(taskId, destinationChainId, token, recipient, amount);
+    }
+}
+```
+
+**Uniswap V4 Integration:**
+
+The Treasury uses Uniswap v4 PoolManager for token swaps on Polygon with custom hooks for escrow-specific logic.
+
+```solidity
 // Custom hook for escrow payment tracking
 contract EscrowPaymentHook is BaseHook {
     function afterSwap(
@@ -1107,17 +1478,163 @@ await createTaskWithAgent(taskParams);
 7. If confidence < threshold or requireHumanReview: notify human for review
 8. If rejected: auto-reject on-chain with reasoning
 
-**Frontend Support for Agent Validators:**
+**Frontend Support for Agent Validators and Cross-Chain Funding:**
+
+The CreateTaskForm now includes:
+
+1. **Creator Funding Section** (blue): Select source chain and token for escrow funding
+2. **Contributor Payment Preferences** (green): Destination chain and token for contributor payout
+3. **Validator Payment Preferences** (purple): Destination chain and token for validator payout
+4. **Agent Configuration** (if agent validator selected): MCP server URL, evaluation criteria, thresholds
+
+Key UX improvements:
+
+- Creator can fund from any chain (Ethereum, Arbitrum, Optimism, Base, Polygon)
+- Automatic bridging to Polygon happens behind the scenes
+- Recipients choose their preferred payout chain and token
+- Clear visual separation with color-coded sections
+- Helpful text: "Funds will be automatically bridged to Polygon for escrow"
 
 ```typescript
-// CreateTaskForm with agent option
+// CreateTaskForm with agent option and payment preferences
 function CreateTaskForm() {
   const [validatorType, setValidatorType] = useState<'HUMAN' | 'AGENT'>('HUMAN');
   const [agentConfig, setAgentConfig] = useState<AgentValidatorConfig | null>(null);
+  const [contributorPref, setContributorPref] = useState<PaymentPreference>({
+    destinationChainId: 137, // Polygon by default
+    tokenAddress: '0x0000000000000000000000000000000000000000', // MATIC
+    recipientAddress: '',
+  });
+  const [validatorPref, setValidatorPref] = useState<PaymentPreference>({
+    destinationChainId: 137,
+    tokenAddress: '0x0000000000000000000000000000000000000000',
+    recipientAddress: '',
+  });
+
+  const supportedChains = [
+    { id: 137, name: 'Polygon' },
+    { id: 1, name: 'Ethereum' },
+    { id: 42161, name: 'Arbitrum' },
+    { id: 10, name: 'Optimism' },
+    { id: 8453, name: 'Base' },
+  ];
+
+  const supportedTokens = [
+    { address: '0x0000000000000000000000000000000000000000', symbol: 'MATIC', name: 'Polygon Native' },
+    { address: '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174', symbol: 'USDC', name: 'USD Coin' },
+    { address: '0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063', symbol: 'DAI', name: 'Dai Stablecoin' },
+    { address: '0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619', symbol: 'WETH', name: 'Wrapped Ether' },
+  ];
 
   return (
     <form>
-      {/* Standard fields */}
+      {/* Standard fields: contributor, validator, escrow amount, percentages, description */}
+
+      {/* Contributor Payment Preferences */}
+      <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+        <h3 className="font-semibold mb-3">Contributor Payment Preferences</h3>
+
+        <div className="mb-3">
+          <label className="block text-sm font-medium mb-1">Destination Chain</label>
+          <select
+            value={contributorPref.destinationChainId}
+            onChange={(e) => setContributorPref({
+              ...contributorPref,
+              destinationChainId: parseInt(e.target.value),
+            })}
+            className="w-full px-3 py-2 border rounded"
+          >
+            {supportedChains.map(chain => (
+              <option key={chain.id} value={chain.id}>{chain.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mb-3">
+          <label className="block text-sm font-medium mb-1">Payout Token</label>
+          <select
+            value={contributorPref.tokenAddress}
+            onChange={(e) => setContributorPref({
+              ...contributorPref,
+              tokenAddress: e.target.value,
+            })}
+            className="w-full px-3 py-2 border rounded"
+          >
+            {supportedTokens.map(token => (
+              <option key={token.address} value={token.address}>
+                {token.symbol} - {token.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mb-3">
+          <label className="block text-sm font-medium mb-1">Recipient Address (on destination chain)</label>
+          <input
+            type="text"
+            placeholder="0x..."
+            value={contributorPref.recipientAddress}
+            onChange={(e) => setContributorPref({
+              ...contributorPref,
+              recipientAddress: e.target.value,
+            })}
+            className="w-full px-3 py-2 border rounded font-mono text-sm"
+          />
+        </div>
+      </div>
+
+      {/* Validator Payment Preferences */}
+      <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-4">
+        <h3 className="font-semibold mb-3">Validator Payment Preferences</h3>
+
+        <div className="mb-3">
+          <label className="block text-sm font-medium mb-1">Destination Chain</label>
+          <select
+            value={validatorPref.destinationChainId}
+            onChange={(e) => setValidatorPref({
+              ...validatorPref,
+              destinationChainId: parseInt(e.target.value),
+            })}
+            className="w-full px-3 py-2 border rounded"
+          >
+            {supportedChains.map(chain => (
+              <option key={chain.id} value={chain.id}>{chain.name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mb-3">
+          <label className="block text-sm font-medium mb-1">Payout Token</label>
+          <select
+            value={validatorPref.tokenAddress}
+            onChange={(e) => setValidatorPref({
+              ...validatorPref,
+              tokenAddress: e.target.value,
+            })}
+            className="w-full px-3 py-2 border rounded"
+          >
+            {supportedTokens.map(token => (
+              <option key={token.address} value={token.address}>
+                {token.symbol} - {token.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mb-3">
+          <label className="block text-sm font-medium mb-1">Recipient Address (on destination chain)</label>
+          <input
+            type="text"
+            placeholder="0x..."
+            value={validatorPref.recipientAddress}
+            onChange={(e) => setValidatorPref({
+              ...validatorPref,
+              recipientAddress: e.target.value,
+            })}
+            className="w-full px-3 py-2 border rounded font-mono text-sm"
+          />
+        </div>
+      </div>
 
       <div className="mb-4">
         <label className="block text-sm font-medium mb-2">Validator Type</label>
