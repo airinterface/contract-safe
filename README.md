@@ -1,5 +1,7 @@
 # Contract Safe (Transparent Escrow built for creators)
 
+<img width="300" height="300" alt="logo" src="https://github.com/user-attachments/assets/8cca3fbe-de05-4c48-a5ce-9a0ad6841197" />
+
 A **task-based escrow system** for tasks, where contributors submit work, validators approve or reject, and funds are automatically released or refunded. All interactions are **gasless for users** via ERC-4337 account abstraction and a Paymaster.
 
 This repo is structured as a **monorepo**, with separate folders for smart contracts, frontend, and scripts.
