@@ -18,16 +18,17 @@ The system is built on **Polygon** for escrow management and payment splitting (
 **Funding Flow (Any Chain → Polygon):**
 
 - Task creators can fund escrow from any supported chain (Ethereum, Arbitrum, Optimism, Base, etc.)
-- **Uniswap v4 on source chain automatically converts creator's tokens to bridgeable assets (USDC)**
-- LayerZero bridges funds from source chain to Polygon
-- Escrow contract on Polygon receives and locks funds
+- **Creator's original token is respected** - no forced conversion on source chain
+- LayerZero bridges creator's token (ETH, DAI, USDC, WBTC, etc.) from source chain to Polygon
+- **Uniswap v4 on Polygon converts bridged token → MATIC** for escrow locking
+- Escrow contract on Polygon locks MATIC
 - Creator never needs to manually bridge or hold MATIC
 
-**Example:** Creator on Ethereum with ETH → Uniswap v4 swaps ETH to USDC → LayerZero bridges USDC to Polygon
+**Example:** Creator on Ethereum with ETH → LayerZero bridges ETH to Polygon → Uniswap v4 swaps ETH to MATIC → MATIC locked in escrow
 
 **Distribution Layer (Polygon → Any Chain):**
 
-- Uniswap v4 on Polygon converts funds to desired tokens
+- Uniswap v4 on Polygon converts MATIC to desired tokens
 - LayerZero bridges tokens to recipient's preferred chain
 - Recipients specify: target chain (Ethereum, Arbitrum, Optimism, Base, etc.) and token (ETH, USDC, DAI, etc.)
 - Automatic routing through optimal bridge providers
@@ -35,20 +36,18 @@ The system is built on **Polygon** for escrow management and payment splitting (
 **Complete Flow Example:**
 
 1. Creator on Ethereum wants to create task with 1 ETH escrow
-2. **Uniswap v4 on Ethereum swaps ETH → USDC** (automatic token conversion)
-3. LayerZero bridges USDC from Ethereum to Polygon
-4. **Uniswap v4 on Polygon swaps USDC → MATIC** (for escrow locking)
-5. Task created on Polygon with escrowed MATIC
-6. Work completed and approved
-7. **Uniswap v4 on Polygon swaps MATIC → recipient's desired tokens** (USDC, DAI, etc.)
-8. LayerZero bridges tokens to recipient's chosen chains
-9. Recipients receive funds on their preferred chains in their preferred tokens
+2. LayerZero bridges 1 ETH from Ethereum to Polygon
+3. **Uniswap v4 on Polygon swaps ETH → MATIC** (for escrow locking)
+4. Task created on Polygon with escrowed MATIC
+5. Work completed and approved
+6. **Uniswap v4 on Polygon swaps MATIC → recipient's desired tokens** (USDC, DAI, etc.)
+7. LayerZero bridges tokens to recipient's chosen chains
+8. Recipients receive funds on their preferred chains in their preferred tokens
 
-**Key Point:** Uniswap v4 is used at THREE stages:
+**Key Point:** Uniswap v4 is used at TWO stages (both on Polygon):
 
-- **Stage 1 (Source Chain)**: Convert creator's token → bridgeable asset (USDC)
-- **Stage 2 (Polygon)**: Convert bridged asset → MATIC for escrow
-- **Stage 3 (Polygon)**: Convert MATIC → recipient's desired tokens for payout
+- **Stage 1 (Polygon)**: Convert bridged token → MATIC for escrow locking
+- **Stage 2 (Polygon)**: Convert MATIC → recipient's desired tokens for payout
 
 ## Architecture
 

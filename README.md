@@ -1,22 +1,27 @@
-# Contract Safe (Transparent Escrow built for creators)
+# Contract Safe
 
-<img width="300" height="300" alt="logo" src="https://github.com/user-attachments/assets/8cca3fbe-de05-4c48-a5ce-9a0ad6841197" />
+A **multi-chain task-based escrow system** built on Polygon, where contributors submit work, validators approve or reject, and funds are automatically released or refunded. Creators can fund tasks from any supported chain (Ethereum, Arbitrum, Optimism, Base), and recipients receive payouts on their preferred chains in their chosen tokens.
 
-A **task-based escrow system** for tasks, where contributors submit work, validators approve or reject, and funds are automatically released or refunded. All interactions are **gasless for users** via ERC-4337 account abstraction and a Paymaster.
+**Key Features:**
 
-This repo is structured as a **monorepo**, with separate folders for smart contracts, frontend, and scripts.
+- **Multi-chain funding**: Create tasks from any supported chain with any token
+- **Automatic token conversion**: Uniswap v4 handles all token swaps on Polygon
+- **Cross-chain payouts**: Recipients get paid on their preferred chain in their chosen token
+- **Gasless interactions**: All user operations are gasless via ERC-4337 and Paymaster
+- **Transparent escrow**: All state transitions recorded on-chain and indexed in real-time
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Multi-Chain Architecture](#multi-chain-architecture)
 - [Features](#features)
 - [Architecture](#architecture)
 - [Folder Structure](#folder-structure)
 - [Getting Started](#getting-started)
 - [Usage](#usage)
-- [MVP vs Future](#mvp-vs-future)
+- [Development Scripts](#development-scripts)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -24,58 +29,104 @@ This repo is structured as a **monorepo**, with separate folders for smart contr
 
 ## Overview
 
-This project enables:
-
-- **Gasless interactions**: contributors, validators, and task creators can interact without holding ETH.
-- **Escrow for tasks**: funds are locked until a validator approves or rejects.
-- **Automatic refunds**: rejected tasks refund the creator automatically.
-- **Transparency**: all task states, submissions, approvals, and rejections are recorded on-chain.
+ContractSafe is an event-driven escrow system that combines on-chain deterministic state with off-chain asynchronous workflows. The system is built on **Polygon** for escrow management (lower gas costs) with **LayerZero** for cross-chain bridging and **Uniswap v4** for token conversions.
 
 ---
 
-## Features ( P1 )
+## Multi-Chain Architecture
 
-- Single-task, single-contributor MVP
-- Validator approval or rejection
-- Refunds on rejection
-- Gasless via ERC-4337 and Paymaster
-- Minimal frontend UI for task creation, submission, and validation
+### Funding Flow (Any Chain → Polygon)
+
+1. **Creator on source chain** (Ethereum, Arbitrum, Optimism, Base) initiates task with their token (ETH, DAI, USDC, WBTC, etc.)
+2. **LayerZero bridges** creator's token from source chain to Polygon
+3. **Uniswap v4 on Polygon** converts bridged token → MATIC for escrow locking
+4. **Escrow locks MATIC** on Polygon until work is approved
+
+**Example:** Creator on Ethereum with 1 ETH → LayerZero bridges ETH to Polygon → Uniswap v4 swaps ETH to MATIC → MATIC locked in escrow
+
+### Payout Flow (Polygon → Any Chain)
+
+1. **Work approved** by validator
+2. **Uniswap v4 on Polygon** converts MATIC → recipient's desired tokens (USDC, DAI, ETH, etc.)
+3. **LayerZero bridges** tokens to recipient's chosen chains
+4. **Recipients receive** funds on their preferred chains in their preferred tokens
+
+**Example:** Contributor wants USDC on Arbitrum → Uniswap v4 swaps MATIC to USDC → LayerZero bridges USDC to Arbitrum
+
+### Supported Chains
+
+- **Escrow Chain**: Polygon (all tasks managed here)
+- **Funding Chains**: Ethereum, Arbitrum, Optimism, Base, Polygon
+- **Payout Chains**: Ethereum, Arbitrum, Optimism, Base, Polygon
+
+---
+
+## Features
+
+- **Multi-chain task creation**: Fund from any supported chain with any token
+- **Automatic token conversion**: Uniswap v4 handles all swaps transparently
+- **Cross-chain payouts**: Recipients choose their preferred chain and token
+- **Single-task, single-contributor MVP**
+- **Validator approval or rejection**
+- **Automatic refunds on rejection**
+- **Gasless via ERC-4337 and Paymaster**
+- **Real-time event indexing** via Goldsky
+- **AI agent validator support** via MCP protocol
 
 ---
 
 ## Architecture
 
 ```mermaid
-graph LR
+graph TB
 
-User[User]
-UI[UI]
-AA[AccountAbstraction]
-Bundler[Bundler]
-Paymaster[Paymaster]
-Escrow[EscrowContract]
-Registry[RoleRegistry]
-Treasury[Treasury]
-Indexer[EventIndexer]
-Oracle[OracleService]
-Uniswap[UniswapV4]
+subgraph "Source Chains (Ethereum, Arbitrum, Optimism, Base)"
+    Creator[Creator]
+    CrossChainFunding[CrossChainFunding Contract]
+    LZ1[LayerZero Endpoint]
+end
 
-User --> UI
-UI --> AA
-AA --> Bundler
-Bundler --> Escrow
-Paymaster --> Bundler
+subgraph "Polygon (Escrow Chain)"
+    LZ2[LayerZero Endpoint]
+    UniswapIn[Uniswap v4 - Token to MATIC]
+    Escrow[EscrowContract]
+    Treasury[Treasury]
+    Registry[RoleRegistry]
+    Paymaster[Paymaster]
+    UniswapOut[Uniswap v4 - MATIC to Token]
+    LZ3[LayerZero Endpoint]
+end
 
-Escrow --> Treasury
-Escrow --> Registry
-Escrow --> Indexer
+subgraph "Destination Chains (Any Supported Chain)"
+    LZ4[LayerZero Endpoint]
+    Recipient[Recipient]
+end
 
-Indexer --> User
-User --> Oracle
-User --> Escrow
+subgraph "Off-Chain Services"
+    Goldsky[Goldsky Indexer]
+    Orchestrator[Orchestrator API]
+    BullMQ[BullMQ Queue]
+    Agent[AI Agent Validator]
+end
 
-Treasury --> AA
-Treasury --> Uniswap
+Creator -->|Fund with any token| CrossChainFunding
+CrossChainFunding -->|Bridge token| LZ1
+LZ1 -.->|Cross-chain message| LZ2
+LZ2 -->|Receive bridged token| UniswapIn
+UniswapIn -->|Convert to MATIC| Escrow
+Escrow -->|Lock escrow| Treasury
+Escrow -->|Check roles| Registry
+Escrow -->|Emit events| Goldsky
+Goldsky -->|Webhook| Orchestrator
+Orchestrator -->|Enqueue job| BullMQ
+BullMQ -->|Validation request| Agent
+Agent -->|Submit decision| Escrow
+Escrow -->|Release payment| Treasury
+Treasury -->|MATIC| UniswapOut
+UniswapOut -->|Convert to desired token| LZ3
+LZ3 -.->|Bridge to destination| LZ4
+LZ4 -->|Deliver funds| Recipient
+Paymaster -.->|Sponsor gas| Escrow
 ```
 
 ---
