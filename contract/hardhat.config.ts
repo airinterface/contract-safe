@@ -5,6 +5,10 @@ import "@nomicfoundation/hardhat-verify";
 import "@typechain/hardhat";
 import "hardhat-gas-reporter";
 import "solidity-coverage";
+import * as dotenv from "dotenv";
+
+// Load environment variables
+dotenv.config();
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -12,9 +16,9 @@ const config: HardhatUserConfig = {
     settings: {
       optimizer: {
         enabled: true,
-        runs: 200,
+        runs: 20, // Reduced for cheaper deployment
       },
-      viaIR: true, // Enable IR-based code generation for better optimization
+      viaIR: false, // Disabled for cheaper deployment
     },
   },
   networks: {
@@ -31,6 +35,11 @@ const config: HardhatUserConfig = {
       url: process.env.POLYGON_RPC_URL || "https://polygon-rpc.com",
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
       chainId: 137,
+    },
+    amoy: {
+      url: process.env.AMOY_RPC_URL || "https://rpc-amoy.polygon.technology",
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
+      chainId: 80002,
     },
     mumbai: {
       url: process.env.MUMBAI_RPC_URL || "https://rpc.ankr.com/polygon_mumbai",
