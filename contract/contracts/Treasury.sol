@@ -206,6 +206,15 @@ contract Treasury is ReentrancyGuard, ITreasury {
     }
 
     /**
+     * @notice Transfer ownership to a new owner
+     * @param newOwner Address of the new owner
+     */
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "Treasury: zero address");
+        owner = newOwner;
+    }
+
+    /**
      * @notice Receive function to accept native token deposits
      */
     receive() external payable {

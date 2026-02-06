@@ -50,7 +50,7 @@ This implementation plan breaks down the ContractSafe system into discrete, incr
     - **Validates: Requirements 6.5**
 
 - [ ] 3. Core Escrow Contract
-  - [ ] 3.1 Implement EscrowContract with state machine
+  - [x] 3.1 Implement EscrowContract with state machine
     - Create EscrowContract.sol with Task struct and TaskState enum
     - Implement createTask function with validation (addresses, percentages, escrow amount)
     - Add state transition functions (startWork, submitWork, approveWork, rejectWork)
@@ -74,7 +74,7 @@ This implementation plan breaks down the ContractSafe system into discrete, incr
     - **Property 4: Escrow Locking**
     - **Validates: Requirements 1.5**
 
-  - [ ] 3.6 Implement payment processing logic
+  - [x] 3.6 Implement payment processing logic
     - Add processPayment internal function with payout calculations
     - Integrate with Treasury for fund transfers
     - Ensure atomic transfers (both succeed or both fail)
@@ -85,7 +85,7 @@ This implementation plan breaks down the ContractSafe system into discrete, incr
     - **Property 16: Payment Atomicity**
     - **Validates: Requirements 5.3, 5.4**
 
-  - [ ] 3.8 Implement refund logic
+  - [x] 3.8 Implement refund logic
     - Add refund internal function
     - Integrate with Treasury for refund transfers
     - Emit TaskRefunded event
@@ -96,7 +96,7 @@ This implementation plan breaks down the ContractSafe system into discrete, incr
     - **Validates: Requirements 5.5**
 
 - [ ] 4. ContractFactory and Agent Support
-  - [ ] 4.1 Implement ContractFactory
+  - [x] 4.1 Implement ContractFactory
     - Create ContractFactory.sol with deployContractSuite function
     - Deploy all contracts (RoleRegistry, Treasury, Paymaster, EscrowContract) in correct order
     - Wire contracts together (grant roles, set authorized callers)
