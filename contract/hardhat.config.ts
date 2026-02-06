@@ -33,7 +33,7 @@ const config: HardhatUserConfig = {
       chainId: 137,
     },
     mumbai: {
-      url: process.env.MUMBAI_RPC_URL || "https://rpc-mumbai.maticvigil.com",
+      url: process.env.MUMBAI_RPC_URL || "https://rpc.ankr.com/polygon_mumbai",
       accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
       chainId: 80001,
     },

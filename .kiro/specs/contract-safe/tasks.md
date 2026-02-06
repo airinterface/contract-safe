@@ -104,7 +104,7 @@ This implementation plan breaks down the ContractSafe system into discrete, incr
     - Store deployment info in mapping
     - _Requirements: Infrastructure_
 
-  - [ ] 4.2 Extend EscrowContract for agent validators
+  - [x] 4.2 Extend EscrowContract for agent validators
     - Add AgentConfig struct to store MCP configuration
     - Implement createTaskWithAgent function
     - Add taskAgentConfigs mapping
@@ -172,7 +172,7 @@ This implementation plan breaks down the ContractSafe system into discrete, incr
     - Test with different token combinations
 
 - [ ] 6. Deployment Scripts
-  - [ ] 6.1 Create multi-chain deployment script
+  - [x] 6.1 Create multi-chain deployment script
     - Write scripts/deploy-multichain.js using Hardhat v3
     - Deploy ContractFactory on Polygon
     - Deploy CrossChainFunding on Ethereum, Arbitrum, Optimism, Base
@@ -181,7 +181,7 @@ This implementation plan breaks down the ContractSafe system into discrete, incr
     - Save all addresses to web/src/contracts/addresses.json (per chain)
     - _Requirements: Multi-chain deployment automation_
 
-  - [ ] 6.2 Create verification script
+  - [x] 6.2 Create verification script
     - Write scripts/verify.js for Etherscan/Polygonscan verification
     - Verify all deployed contracts on all chains
     - _Requirements: Transparency_

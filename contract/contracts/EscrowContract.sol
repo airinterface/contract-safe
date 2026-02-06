@@ -42,6 +42,14 @@ contract EscrowContract is ReentrancyGuard, IEscrow {
         uint256 updatedAt;
     }
 
+    // Agent configuration struct
+    struct AgentConfig {
+        string mcpUrl;           // MCP server URL
+        string evaluationCriteria; // Criteria for evaluation
+        uint8 confidenceThreshold; // Minimum confidence (0-100)
+        bool isAgentValidator;   // True if using agent validator
+    }
+
     // Contract references
     ITreasury public immutable treasury;
     IRoleRegistry public immutable roleRegistry;
@@ -49,6 +57,7 @@ contract EscrowContract is ReentrancyGuard, IEscrow {
 
     // Storage
     mapping(uint256 => Task) public tasks;
+    mapping(uint256 => AgentConfig) public taskAgentConfigs;
     uint256 public nextTaskId;
 
     // Native token constant
@@ -153,6 +162,90 @@ contract EscrowContract is ReentrancyGuard, IEscrow {
             contributor,
             validator,
             msg.value
+        );
+    }
+
+    /**
+     * @notice Create a new task with agent validator configuration
+     * @param contributor Address of the contributor
+     * @param validator Address of the validator (agent wallet)
+     * @param contributorPercentage Percentage for contributor (0-100)
+     * @param validatorPercentage Percentage for validator (0-100)
+     * @param descriptionHash IPFS hash of task description
+     * @param mcpUrl MCP server URL for agent validator
+     * @param evaluationCriteria Criteria for agent evaluation
+     * @param confidenceThreshold Minimum confidence threshold (0-100)
+     * @return taskId The created task ID
+     */
+    function createTaskWithAgent(
+        address contributor,
+        address validator,
+        uint8 contributorPercentage,
+        uint8 validatorPercentage,
+        string calldata descriptionHash,
+        string calldata mcpUrl,
+        string calldata evaluationCriteria,
+        uint8 confidenceThreshold
+    ) external payable nonReentrant returns (uint256 taskId) {
+        // Validate addresses
+        require(contributor != address(0), "Escrow: zero contributor");
+        require(validator != address(0), "Escrow: zero validator");
+        require(contributor != validator, "Escrow: same contributor/validator");
+        require(msg.sender != contributor, "Escrow: creator is contributor");
+        require(msg.sender != validator, "Escrow: creator is validator");
+
+        // Validate percentages
+        require(
+            contributorPercentage + validatorPercentage == 100,
+            "Escrow: percentages must sum to 100"
+        );
+        require(contributorPercentage > 0, "Escrow: zero contributor percentage");
+        require(validatorPercentage > 0, "Escrow: zero validator percentage");
+
+        // Validate escrow amount
+        require(msg.value > 0, "Escrow: zero escrow amount");
+
+        // Validate agent config
+        require(bytes(mcpUrl).length > 0, "Escrow: empty MCP URL");
+        require(bytes(evaluationCriteria).length > 0, "Escrow: empty criteria");
+        require(confidenceThreshold > 0 && confidenceThreshold <= 100, "Escrow: invalid threshold");
+
+        // Create task
+        taskId = nextTaskId++;
+        
+        tasks[taskId] = Task({
+            taskId: taskId,
+            creator: msg.sender,
+            contributor: contributor,
+            validator: validator,
+            escrowAmount: msg.value,
+            contributorPercentage: contributorPercentage,
+            validatorPercentage: validatorPercentage,
+            state: TaskState.Created,
+            descriptionHash: descriptionHash,
+            artifactsHash: "",
+            createdAt: block.timestamp,
+            updatedAt: block.timestamp
+        });
+
+        // Store agent configuration
+        taskAgentConfigs[taskId] = AgentConfig({
+            mcpUrl: mcpUrl,
+            evaluationCriteria: evaluationCriteria,
+            confidenceThreshold: confidenceThreshold,
+            isAgentValidator: true
+        });
+
+        // Deposit escrow to treasury
+        treasury.depositEscrow{value: msg.value}(taskId, NATIVE_TOKEN, msg.value);
+
+        emit TaskCreatedWithAgent(
+            taskId,
+            msg.sender,
+            contributor,
+            validator,
+            msg.value,
+            mcpUrl
         );
     }
 
@@ -294,6 +387,15 @@ contract EscrowContract is ReentrancyGuard, IEscrow {
      */
     function getTask(uint256 taskId) external view returns (Task memory task) {
         return tasks[taskId];
+    }
+
+    /**
+     * @notice Get agent configuration for a task
+     * @param taskId The task ID
+     * @return config The agent configuration
+     */
+    function getAgentConfig(uint256 taskId) external view returns (AgentConfig memory config) {
+        return taskAgentConfigs[taskId];
     }
 
     /**

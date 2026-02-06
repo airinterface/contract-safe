@@ -14,6 +14,14 @@ interface IEscrow {
         address validator,
         uint256 escrowAmount
     );
+    event TaskCreatedWithAgent(
+        uint256 indexed taskId,
+        address indexed creator,
+        address contributor,
+        address validator,
+        uint256 escrowAmount,
+        string mcpUrl
+    );
     event TaskWorkingStarted(uint256 indexed taskId, address indexed contributor);
     event ApprovalRequested(uint256 indexed taskId, string artifactsHash);
     event ValidationStarted(uint256 indexed taskId, address indexed validator);
@@ -29,6 +37,17 @@ interface IEscrow {
         uint8 contributorPercentage,
         uint8 validatorPercentage,
         string calldata descriptionHash
+    ) external payable returns (uint256 taskId);
+
+    function createTaskWithAgent(
+        address contributor,
+        address validator,
+        uint8 contributorPercentage,
+        uint8 validatorPercentage,
+        string calldata descriptionHash,
+        string calldata mcpUrl,
+        string calldata evaluationCriteria,
+        uint8 confidenceThreshold
     ) external payable returns (uint256 taskId);
 
     function startWork(uint256 taskId) external;
