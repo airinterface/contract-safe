@@ -2,17 +2,28 @@ FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 
+# Install build dependencies
+RUN apk add --no-cache git
+
+# Copy go mod files
 COPY go.mod go.sum ./
 RUN go mod download
 
+# Copy source code
 COPY . .
-RUN go build -o bin/server cmd/server/main.go
+
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server ./cmd/server/main.go
 
 FROM alpine:latest
 
-WORKDIR /app
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates
 
-COPY --from=builder /app/bin/server .
+WORKDIR /root/
+
+# Copy the binary from builder
+COPY --from=builder /app/server .
 
 EXPOSE 8080
 

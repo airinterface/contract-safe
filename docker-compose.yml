@@ -18,11 +18,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - contractsafe
 
   # Redis for BullMQ
   redis:
     image: redis:7-alpine
     container_name: contractsafe-redis
+    command: redis-server --appendonly yes
     ports:
       - "6379:6379"
     volumes:
@@ -32,8 +35,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - contractsafe
 
-  # Hardhat Node (Local Blockchain)
+  # Hardhat Node (Local Blockchain) - Optional for local testing
   hardhat:
     build:
       context: ./contract
@@ -45,6 +50,10 @@ services:
     volumes:
       - ./contract:/app
       - /app/node_modules
+    networks:
+      - contractsafe
+    profiles:
+      - local-blockchain
 
   # Orchestrator API (Go)
   api:
@@ -55,8 +64,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      DATABASE_URL: postgresql://contractsafe:contractsafe@postgres:5432/contractsafe
+      DATABASE_URL: postgresql://contractsafe:contractsafe@postgres:5432/contractsafe?sslmode=disable
       REDIS_URL: redis://redis:6379
+      POLYGON_RPC_URL: ${POLYGON_RPC_URL:-https://rpc-amoy.polygon.technology}
+      ESCROW_CONTRACT_ADDRESS: ${ESCROW_CONTRACT_ADDRESS:-}
+      GOLDSKY_WEBHOOK_SECRET: ${GOLDSKY_WEBHOOK_SECRET:-dev_secret}
       PORT: 8080
     depends_on:
       postgres:
@@ -66,6 +78,9 @@ services:
     volumes:
       - ./api:/app
       - /app/bin
+    networks:
+      - contractsafe
+    restart: unless-stopped
 
   # Frontend (React + Vite)
   web:
@@ -77,11 +92,15 @@ services:
       - "5173:5173"
     environment:
       VITE_API_URL: http://localhost:8080
-      VITE_DYNAMIC_ENV_ID: ${REACT_APP_DYNAMIC_ENV_ID}
+      VITE_DYNAMIC_ENV_ID: ${REACT_APP_DYNAMIC_ENV_ID:-}
     volumes:
       - ./web:/app
       - /app/node_modules
     command: npm run dev -- --host
+    networks:
+      - contractsafe
+    profiles:
+      - frontend
 
   # Example MCP Agent
   mcp-agent:
@@ -93,12 +112,20 @@ services:
       - "3000:3000"
     environment:
       PORT: 3000
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - ./example_agent:/app
       - /app/node_modules
+    networks:
+      - contractsafe
+    profiles:
+      - agent
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  contractsafe:
+    driver: bridge
